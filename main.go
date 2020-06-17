@@ -71,16 +71,16 @@ func main() {
     var results [] Article
 
     // Passing bson.D{{}} as the filter matches all documents in the collection
-    cur, err := collection.Find(context.Background(), bson.D{{}}, findOptions)
+    cur, err := collection.Find(ctx, bson.D{{}}, findOptions)
     if err != nil {
         log.Printf(err.Error())
         c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
         return
     }
-    defer cur.Close(context.Background())
+    defer cur.Close(ctx)
     fromString := c.DefaultQuery("from", "")
     toString := c.DefaultQuery("to", "")
-    for cur.Next(context.Background()) {
+    for cur.Next(ctx) {
 
       var elem Insert
       err := cur.Decode(&elem)
