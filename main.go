@@ -5,6 +5,7 @@ import (
 		"context"
 		"log"
 		"time"
+		"net/http"
 	  "github.com/gin-gonic/gin"
 		"go.mongodb.org/mongo-driver/bson"
     "go.mongodb.org/mongo-driver/mongo"
@@ -35,12 +36,15 @@ type Source struct {
 func main() {
 	mongoUser := os.Getenv("MONGO_USER")
 	mongoPassword := os.Getenv("MONGO_PASS")
+	mongoHost := os.Getenv("MONGO_HOST")
 
 	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://" +
 					mongoUser +
 					":" +
 					mongoPassword +
-					"@mongodb:27017"))
+					"@" +
+					mongoHost +
+					":27017"))
 	if err != nil {
 	    log.Fatal(err)
 	}
@@ -48,6 +52,9 @@ func main() {
 		context.Background(),
 		10*time.Second)
 	err = client.Connect(ctx)
+	if err != nil {
+	    log.Fatal(err)
+	}
 
 	collection := client.Database("news").Collection("inserts")
 
@@ -61,61 +68,52 @@ func main() {
 		findOptions.SetLimit(1000)
 
 		// Here's an array in which you can store the decoded documents
-		var results []*Article
+		var results [] Article
 
 		// Passing bson.D{{}} as the filter matches all documents in the collection
-		cur, err := collection.Find(context.TODO(), bson.D{{}}, findOptions)
+		cur, err := collection.Find(context.Background(), bson.D{{}}, findOptions)
 		if err != nil {
-		    log.Fatal(err)
+		    log.Printf(err.Error())
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
 		}
+		defer cur.Close(context.Background())
 		fromString := c.DefaultQuery("from", "")
 		toString := c.DefaultQuery("to", "")
-		// Finding multiple documents returns a cursor
-		// Iterating through the cursor allows us to decode documents one at a time
-		for cur.Next(context.TODO()) {
+		for cur.Next(context.Background()) {
 
-		    // create a value into which the single document can be decoded
-		    var elem Insert
-		    err := cur.Decode(&elem)
-		    if err != nil {
-		        log.Printf(err.Error())
-		    }
+	    var elem Insert
+	    err := cur.Decode(&elem)
+	    if err != nil {
+	        log.Printf(err.Error())
+	    } else {
         for _, article := range elem.Articles {
 					if filterByDate(article, fromString, toString) {
-						results = append(results, &article)
+						results = append(results, article)
 					}
 				}
+			}
 		}
 
 		if err := cur.Err(); err != nil {
 		    log.Printf(err.Error())
 		}
-
-		// Close the cursor once finished
-		cur.Close(context.TODO())
-
 		c.JSON(200, results)
 	})
 	r.Run() // listen and serve localhost:8080
 }
 
 func filterByDate(record Article, fromString string, toString string) bool {
-		from, err := time.Parse(time.RFC3339, fromString)
-		if err != nil {
-			log.Printf("unable to parse from time " + fromString)
-			return false
-		}
-		to, err := time.Parse(time.RFC3339, toString)
-		if err != nil {
-			log.Printf("unable to parse to time " + toString)
-			return false
-		}
+	from, err := time.Parse(time.RFC3339, fromString)
+	noFrom := err != nil
+	to, err := time.Parse(time.RFC3339, toString)
+	noTo := err != nil
 
-		theDate, err := time.Parse(time.RFC3339, record.PublishedAt)
-		if err != nil {
-			log.Printf("unable to parse time " + record.PublishedAt)
-			return false;
-		}
-		return theDate.After(from) &&
-				theDate.Before(to);
+	theDate, err := time.Parse(time.RFC3339, record.PublishedAt)
+	if err != nil {
+		log.Printf("unable to parse time " + record.PublishedAt)
+		return false;
+	}
+	return (noFrom || theDate.After(from)) &&
+			(noTo || theDate.Before(to))
 }
