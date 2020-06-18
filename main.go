@@ -1,11 +1,13 @@
 package main
 
 import (
-    "os"
     "context"
+    "fmt"
     "log"
-    "time"
     "net/http"
+    "os"
+    "time"
+
     "github.com/gin-gonic/gin"
     "go.mongodb.org/mongo-driver/bson"
     "go.mongodb.org/mongo-driver/mongo"
@@ -38,21 +40,20 @@ func main() {
   mongoPassword := os.Getenv("MONGO_PASS")
   mongoHost := os.Getenv("MONGO_HOST")
 
-  client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://" +
-          mongoUser +
-          ":" +
-          mongoPassword +
-          "@" +
-          mongoHost +
-          ":27017"))
+	mongoURI := fmt.Sprintf("mongodb://%s:%s@%s:27017",
+    mongoUser,
+    mongoPassword,
+    mongoHost)
+  client, err := mongo.NewClient(options.Client().ApplyURI(mongoURI))
   if err != nil {
       log.Fatal(err)
   }
-  ctx, _ := context.WithTimeout(
+  ctx, cancel := context.WithTimeout(
     context.Background(),
     10*time.Second)
-  err = client.Connect(ctx)
-  if err != nil {
+  defer cancel()
+
+  if err = client.Connect(ctx); err != nil {
       log.Fatal(err)
   }
 
@@ -60,9 +61,11 @@ func main() {
 
   r := gin.Default()
   r.GET("/v1/headlines", func(c *gin.Context) {
-    ctx, _ = context.WithTimeout(
+    ctx, cancel = context.WithTimeout(
       context.Background(),
       5*time.Second)
+    defer cancel()
+
     // Pass these options to the Find method
     findOptions := options.Find()
     findOptions.SetLimit(1000)
@@ -73,7 +76,7 @@ func main() {
     // Passing bson.D{{}} as the filter matches all documents in the collection
     cur, err := collection.Find(ctx, bson.D{{}}, findOptions)
     if err != nil {
-        log.Printf(err.Error())
+        log.Print(err)
         c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
         return
     }
@@ -96,11 +99,13 @@ func main() {
     }
 
     if err := cur.Err(); err != nil {
-        log.Printf(err.Error())
+        log.Print(err)
     }
     c.JSON(200, results)
   })
-  r.Run() // listen and serve localhost:8080
+  if err = r.Run(); err != nil {
+    log.Panic(err)
+  }
 }
 
 func filterByDate(record Article, fromString string, toString string) bool {
